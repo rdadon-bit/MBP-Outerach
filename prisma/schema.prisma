@@ -1,0 +1,95 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum BorrowerStatus {
+  NEW          // imported, not yet emailed
+  IN_SEQUENCE  // initial email sent, follow-ups active
+  RESPONDED    // replied — sequence stopped
+  UNSUBSCRIBED
+  BOUNCED
+  DEAD         // exhausted cadence or manually closed
+  CLIENT       // converted
+}
+
+model Borrower {
+  id              String         @id @default(cuid())
+  firstName       String
+  lastName        String?
+  email           String         @unique
+  company         String?
+  phone           String?
+  propertyAddress String?
+  propertyType    String?
+  loanAmount      String?
+  source          String?        // costar | elementix | manual
+  notes           String?
+  status          BorrowerStatus @default(NEW)
+  touchCount      Int            @default(0)
+  sequenceStart   DateTime?      // when initial email was sent
+  lastTouchAt     DateTime?
+  nextTouchAt     DateTime?      // when next follow-up is due
+  gmailThreadId   String?
+  respondedAt     DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  emails          EmailLog[]
+  queueItems      QueueItem[]
+
+  @@index([status, nextTouchAt])
+}
+
+model Template {
+  id        String   @id @default(cuid())
+  name      String
+  touchType String   // initial | followup1 | followup2 | followup3 | monthly
+  subject   String
+  body      String   // supports {{firstName}} {{lastName}} {{company}} {{propertyAddress}} {{propertyType}} {{loanAmount}}
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model QueueItem {
+  id          String    @id @default(cuid())
+  borrowerId  String
+  borrower    Borrower  @relation(fields: [borrowerId], references: [id], onDelete: Cascade)
+  touchType   String    // initial | followup1 | followup2 | followup3 | monthly
+  scheduledAt DateTime  // exact send time within 9am–3pm PT window
+  status      String    @default("pending") // pending | sent | failed | cancelled
+  error       String?
+  createdAt   DateTime  @default(now())
+
+  @@index([status, scheduledAt])
+}
+
+model EmailLog {
+  id             String    @id @default(cuid())
+  borrowerId     String
+  borrower       Borrower  @relation(fields: [borrowerId], references: [id], onDelete: Cascade)
+  touchType      String
+  subject        String
+  gmailMessageId String?
+  gmailThreadId  String?
+  sentAt         DateTime  @default(now())
+  replied        Boolean   @default(false)
+  repliedAt      DateTime?
+
+  @@index([borrowerId])
+  @@index([replied])
+}
+
+model Setting {
+  key   String @id
+  value String
+}
+// Settings keys used:
+// google_refresh_token, sender_email, sender_name,
+// daily_new_limit (default 120), daily_followup_limit (default 80),
+// window_start_pt (default 9), window_end_pt (default 15),
+// ramp_up (true/false — caps total at 40/day, +20 per week), paused (true/false)
